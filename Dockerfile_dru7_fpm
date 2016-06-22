@@ -1,0 +1,53 @@
+From 3hdeng/php_fpm_ubu:t0
+# to build -t 3hdeng/phpfpm_dru7_mysql:t0
+
+# -v /var/www/dru7 to export the volume for dru7 php files
+# --volumes-from dru7  to get persistent /var/www/dru7 
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive  && apt-get install drush -y 
+
+#RUN rm -r /var/www/dru7/*  && 
+
+# assume fresh installation of dru7 and use mysql at container 'db'
+RUN mkdir -p /var/www && cd /var/www && \
+ drush dl  drupal --drupal-project-rename=dru7
+
+
+# need mysql-client, php5-mysql
+RUN apt-get install php5-mysql -y
+RUN apt-get install mysql-client -y
+RUN apt-get clean
+
+# how build a docker image depending on another container?
+# can we use container name 'db' ??
+# assume mysql docker instance already running on private ip 172.17.0.2
+
+# dummdbip to be replaced in dkb_phpfpm_dru_mysql.sh during image build
+# ARG Mysql_user0=user0
+# ARG Mysql_pass0=pass0
+ENV Mysql_user0 user0
+ENV Mysql_pass0 pass0
+
+
+RUN db_url="mysql://${Mysql_user0}:${Mysql_pass0}@dummydbip/dru7"  && echo $db_url && \ 
+ cd /var/www/dru7 && \
+   drush si standard -y --db-url=${db_url} --site-name=dru7 
+
+RUN chown www-data:www-data /var/www/dru7/sites/default/files
+
+# reset dru7 admin password
+RUN cd /var/www/dru7 && drush ev "include_once('includes/password.inc');db_update('users')->fields(array('pass' => user_hash_password('newpass'),))->condition('uid', 1, '=')->execute();"
+
+# for docker run
+ENV mydb_alias db
+ENV mydb_ip dummydbip
+ENV mydb_ip_esc "172\.17\.0\.2" 
+# has to use ENV to pass across different RUNs
+
+
+RUN mydb_ip_esc=$(echo $mydb_ip| sed -e 's/\./\\./g') && echo ${mydb_ip_esc} && \
+pattern='s/'${mydb_ip_esc}'/'${mydb_alias}'/' && echo $pattern && \
+ cd /var/www/dru7/sites/default && chmod +w settings.php && \
+ sed -i $pattern settings.php && \
+ chmod -w settings.php
+
+#CMD ["apache2ctl", "-DFOREGROUND"]
